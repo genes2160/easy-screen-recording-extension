@@ -1,0 +1,20 @@
+{
+    "manifest_version": 3,
+    "name": "Quick Screen Recorder (Zoomable)",
+    "version": "1.0.0",
+    "description": "Floating draggable button to record the screen with optional zoom and duration.",
+    "permissions": [
+        "storage"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ]
+}
