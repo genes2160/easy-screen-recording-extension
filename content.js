@@ -196,6 +196,10 @@
 
   $start.addEventListener("click", async () => {
     try {
+      //apply default seconds if the input is empty or invalid
+      if ($secs.value === "" || isNaN($secs.value) || +$secs.value <= 0) {
+        $secs.value = 300;
+      }
       const secs = Math.max(1, +$secs.value || 10);
       const useZoom = $zoomOn.checked;
       const fps = Math.max(10, Math.min(60, +$fps.value || 30));
@@ -217,10 +221,17 @@
           }
         : null;
 
-      stopFn = await recordScreen(secs * 1000, zoom);
+      document.getElementById("qsr-widget").style.display = "none";
+      stopFn = await recordScreen(10, secs * 1000, zoom);
+      //hide the button till the timeout is over.....
+      setTimeout(() => {
+        document.getElementById("qsr-widget").style.display = "block";
+      }, secs * 1000);
     } catch (err) {
-      console.error(err);
-      alert("Failed to start recording. Check console.");
+      // console.error(err);
+      // alert("Failed to start recording. Check console.");
+      console.log("Failed to start recording. Check console.", error);
+      document.getElementById("qsr-widget").style.display = "block";
       $start.disabled = false;
       $stop.disabled = true;
       $toggle.textContent = "⏺";
@@ -241,7 +252,7 @@
   // -------------------------
   // Robust recordScreen impl
   // -------------------------
-  async function recordScreen(durationMs = null, zoom = null) {
+  async function recordScreen(countdown, durationMs = null, zoom = null) {
     let mediaRecorder;
     let recordedChunks = [];
 
@@ -254,6 +265,36 @@
         audio: true,
       });
 
+      //have an overlay countdown on the screen
+      const overlay = document.createElement("div");
+      overlay.style.position = "fixed";
+      overlay.style.top = "50%";
+      overlay.style.left = "50%";
+      overlay.style.transform = "translate(-50%, -50%)";
+      overlay.style.background = "rgba(0, 0, 0, 0.7)";
+      overlay.style.color = "#fff";
+      overlay.style.padding = "20px 40px";
+      overlay.style.fontSize = "48px";
+      overlay.style.borderRadius = "10px";
+      overlay.style.zIndex = "2147483647";
+      overlay.style.fontFamily = "Arial, sans-serif";
+      overlay.textContent = `Starting in ${countdown}s`;
+      document.body.appendChild(overlay);
+      let overlayCountdown = countdown;
+      const overlayInterval = setInterval(() => {
+        overlayCountdown -= 1;
+        if (overlayCountdown > 0) {
+          overlay.textContent = overlayCountdown;
+        } else {
+          clearInterval(overlayInterval);
+          document.body.removeChild(overlay);
+        }
+      }, 1000);
+      await new Promise((res) => setTimeout(res, countdown * 1000));
+      if (overlay.parentNode) {
+        clearInterval(overlayInterval);
+        document.body.removeChild(overlay);
+      }
       // If no zoom required, do direct record of the display stream
       if (!zoom) {
         const mime = pickMime();
