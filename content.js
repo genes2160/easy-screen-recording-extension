@@ -422,7 +422,11 @@
       mediaRecorder.start();
       if (durationMs)
         setTimeout(
-          () => mediaRecorder.state === "recording" && mediaRecorder.stop(),
+          () => {
+            mediaRecorder.state === "recording" && mediaRecorder.stop();
+            $start.disabled = false;
+            $stop.disabled = true;
+          },
           durationMs
         );
       displayStream.getVideoTracks()[0].onended = () =>
