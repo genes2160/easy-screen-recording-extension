@@ -249,233 +249,195 @@
     $toggle.textContent = "⏺";
   };
 
-  // -------------------------
-  // Robust recordScreen impl
-  // -------------------------
-  async function recordScreen(countdown, durationMs = null, zoom = null) {
-    let mediaRecorder;
-    let recordedChunks = [];
+    // -------------------------
+    // Robust recordScreen impl (with full audio capture)
+    // -------------------------
+    async function recordScreen(countdown, durationMs = null, zoom = null) {
+      let mediaRecorder;
+      let recordedChunks = [];
 
-    const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+      const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
-    try {
-      // 1) Ask the user what to capture
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 30 },
-        audio: true,
-      });
-
-      //have an overlay countdown on the screen
-      const overlay = document.createElement("div");
-      overlay.style.position = "fixed";
-      overlay.style.top = "50%";
-      overlay.style.left = "50%";
-      overlay.style.transform = "translate(-50%, -50%)";
-      overlay.style.background = "rgba(0, 0, 0, 0.7)";
-      overlay.style.color = "#fff";
-      overlay.style.padding = "20px 40px";
-      overlay.style.fontSize = "48px";
-      overlay.style.borderRadius = "10px";
-      overlay.style.zIndex = "2147483647";
-      overlay.style.fontFamily = "Arial, sans-serif";
-      overlay.textContent = `Starting in ${countdown}s`;
-      document.body.appendChild(overlay);
-      let overlayCountdown = countdown;
-      const overlayInterval = setInterval(() => {
-        overlayCountdown -= 1;
-        if (overlayCountdown > 0) {
-          overlay.textContent = overlayCountdown;
-        } else {
-          clearInterval(overlayInterval);
-          document.body.removeChild(overlay);
-        }
-      }, 1000);
-      await new Promise((res) => setTimeout(res, countdown * 1000));
-      if (overlay.parentNode) {
-        clearInterval(overlayInterval);
-        document.body.removeChild(overlay);
-      }
-      // If no zoom required, do direct record of the display stream
-      if (!zoom) {
-        const mime = pickMime();
-        const directRecorder = new MediaRecorder(displayStream, {
-          mimeType: mime,
+      try {
+        // 1️⃣ Ask the user what to capture (with system/tab audio)
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            frameRate: 30,
+            displaySurface: "browser",
+            surfaceSwitching: "include",
+            selfBrowserSurface: "include",
+          },
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            sampleRate: 44100,
+          },
         });
-        directRecorder.ondataavailable = (e) =>
+
+        // 2️⃣ Capture mic separately
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 44100,
+          },
+        });
+
+        // 3️⃣ Detect duplicate mic in system audio
+        const micTrack = micStream.getAudioTracks()[0];
+        const systemTracks = displayStream.getAudioTracks();
+        const systemTrack = systemTracks.length > 0 ? systemTracks[0] : null;
+
+        let micInSystem = false;
+        if (systemTrack) {
+          const sys = systemTrack.getSettings();
+          const mic = micTrack.getSettings();
+          if (sys.deviceId && mic.deviceId && sys.deviceId === mic.deviceId)
+            micInSystem = true;
+          console.log("🎧 System audio settings:", sys);
+        }
+        console.log(micInSystem ? "⚠️ Mic already in system audio" : "✅ Mic separate");
+
+        // 4️⃣ Mix with AudioContext
+        const audioCtx = new AudioContext();
+        const destination = audioCtx.createMediaStreamDestination();
+
+        const sysSource =
+          systemTrack && systemTracks.length > 0
+            ? audioCtx.createMediaStreamSource(displayStream)
+            : null;
+        const micSource = audioCtx.createMediaStreamSource(micStream);
+
+        const sysGain = audioCtx.createGain();
+        const micGain = audioCtx.createGain();
+        sysGain.gain.value = 1.0;
+        micGain.gain.value = 1.0;
+
+        if (sysSource) sysSource.connect(sysGain).connect(destination);
+        if (!micInSystem) micSource.connect(micGain).connect(destination);
+
+        // 5️⃣ Combine video + mixed audio
+        const finalStream = new MediaStream([
+          ...displayStream.getVideoTracks(),
+          ...destination.stream.getAudioTracks(),
+        ]);
+
+        console.log("🎬 Final mixed stream tracks:");
+        finalStream.getAudioTracks().forEach((t) =>
+          console.log("Audio track:", t.label, t.getSettings())
+        );
+
+        // ===== Countdown overlay =====
+        const overlay = document.createElement("div");
+        overlay.style.cssText = `
+          position:fixed;top:50%;left:50%;
+          transform:translate(-50%,-50%);
+          background:rgba(0,0,0,0.7);color:#fff;
+          padding:20px 40px;font-size:48px;border-radius:10px;
+          z-index:2147483647;font-family:Arial,sans-serif;`;
+        overlay.textContent = `Starting in ${countdown}s`;
+        document.body.appendChild(overlay);
+
+        let overlayCountdown = countdown;
+        const overlayInterval = setInterval(() => {
+          overlayCountdown -= 1;
+          if (overlayCountdown > 0) {
+            overlay.textContent = overlayCountdown;
+          } else {
+            clearInterval(overlayInterval);
+            overlay.remove();
+          }
+        }, 1000);
+        await new Promise((r) => setTimeout(r, countdown * 1000));
+        if (overlay.parentNode) {
+          clearInterval(overlayInterval);
+          overlay.remove();
+        }
+
+        // ============ Recording logic ============
+        const mime = pickMime();
+        mediaRecorder = new MediaRecorder(finalStream, {
+          mimeType: mime,
+          audioBitsPerSecond: 128000,
+        });
+
+        mediaRecorder.ondataavailable = (e) =>
           e.data.size && recordedChunks.push(e.data);
-        directRecorder.onstop = () =>
-          finalize(downloadBlob(recordedChunks, "webm"), displayStream);
+        mediaRecorder.onstop = () => {
+          finalize(downloadBlob(recordedChunks, "webm"), finalStream);
+          $start.disabled = false;
+          $stop.disabled = true;
+          $toggle.textContent = "⏺";
+          console.log("✅ Recording stopped, UI reset.");
+          if (typeof window.__qsr_reset === "function")
+            setTimeout(() => window.__qsr_reset(), 0);
+        }
 
-        // small warm-up to ensure first chunk has frames
-        await waitForFirstFrame(displayStream);
+        // optional warm-up
+        await waitForFirstFrame(finalStream);
 
-        directRecorder.start();
-        if (durationMs)
-          setTimeout(
-            () => directRecorder.state === "recording" && directRecorder.stop(),
-            durationMs
-          );
-        displayStream.getVideoTracks()[0].onended = () =>
-          directRecorder.state === "recording" && directRecorder.stop();
+        mediaRecorder.start();
+        if (durationMs) {
+            setTimeout(() => {
+              if (mediaRecorder.state === "recording") {
+                console.log("⏹️ Duration reached — stopping recording");
+                mediaRecorder.stop();
+              }
+            }, durationMs);
+        }
 
-        return () => {
-          if (directRecorder.state === "recording") directRecorder.stop();
+        // 🟥 Handle manual user stop (video track end)
+        finalStream.getVideoTracks()[0].onended = () => {
+          if (mediaRecorder.state === "recording") {
+            console.log("🎞️ Video stream ended — stopping recording");
+            mediaRecorder.stop();
+          }
         };
+        return () => {
+            if (mediaRecorder.state === "recording") {
+              console.log("🛑 Manual stop triggered");
+              mediaRecorder.stop();
+            }
+        };
+      } catch (err) {
+        console.error("recordScreen error:", err);
+        throw err;
       }
 
-      // 2) Zoom path: draw to canvas (background-safe)
-      const settings = displayStream.getVideoTracks()[0].getSettings();
-      const vw = settings.width || 1280;
-      const vh = settings.height || 720;
+      // ---- helpers ----
+      function pickMime() {
+        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))
+          return "video/webm;codecs=vp9";
+        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8"))
+          return "video/webm;codecs=vp8";
+        return "video/webm";
+      }
 
-      const videoEl = document.createElement("video");
-      videoEl.srcObject = displayStream;
-      videoEl.muted = true;
-      videoEl.playsInline = true;
+      function waitForFirstFrame(stream) {
+        return new Promise((resolve) => requestAnimationFrame(resolve));
+      }
 
-      await new Promise((resolve) => {
-        const done = () => resolve();
-        videoEl.addEventListener("loadedmetadata", done, { once: true });
-        setTimeout(done, 1000); // safety
-      });
-      await videoEl.play();
-      await new Promise((resolve) => {
-        if (!videoEl.paused && videoEl.readyState >= 2) return resolve();
-        videoEl.addEventListener("playing", () => resolve(), { once: true });
-      });
+      function downloadBlob(chunks, ext = "webm") {
+        const blob = new Blob(chunks, { type: `video/${ext}` });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `eugene-extension-screen-recording-${new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace(/:/g, "-")}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return url;
+      }
 
-      const canvas = document.createElement("canvas");
-      canvas.width = vw;
-      canvas.height = vh;
-      const ctx = canvas.getContext("2d");
-
-      const {
-        start = 1,
-        end = 1.5,
-        duration = 3000,
-        fps = 30,
-        focus = { x: 0.5, y: 0.5 },
-      } = zoom;
-
-      const frameInterval = Math.max(15, Math.floor(1000 / fps));
-      const startMs = performance.now();
-
-      const drawOnce = (nowMs) => {
-        // fill background to avoid transparent first frames
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, vw, vh);
-
-        const tNorm = clamp((nowMs - startMs) / duration, 0, 1);
-        const ease =
-          tNorm < 0.5 ? 2 * tNorm * tNorm : -1 + (4 - 2 * tNorm) * tNorm;
-        const z = start + (end - start) * ease;
-
-        const sW = videoEl.videoWidth || vw;
-        const sH = videoEl.videoHeight || vh;
-
-        const srcW = vw / z;
-        const srcH = vh / z;
-        const fx = clamp(focus.x, 0, 1) * vw;
-        const fy = clamp(focus.y, 0, 1) * vh;
-        const srcX = clamp(fx - srcW / 2, 0, vw - srcW);
-        const srcY = clamp(fy - srcH / 2, 0, vh - srcH);
-
-        const scaleX = sW / vw;
-        const scaleY = sH / vh;
-
-        ctx.drawImage(
-          videoEl,
-          srcX * scaleX,
-          srcY * scaleY,
-          srcW * scaleX,
-          srcH * scaleY,
-          0,
-          0,
-          vw,
-          vh
-        );
-      };
-
-      // warm-up draw before recording
-      drawOnce(performance.now());
-      const drawTimer = setInterval(
-        () => drawOnce(performance.now()),
-        frameInterval
-      );
-
-      // capture canvas and add audio
-      const canvasStream = canvas.captureStream(fps);
-      displayStream.getAudioTracks().forEach((t) => canvasStream.addTrack(t));
-
-      const mime = pickMime();
-      mediaRecorder = new MediaRecorder(canvasStream, { mimeType: mime });
-      mediaRecorder.ondataavailable = (e) =>
-        e.data.size && recordedChunks.push(e.data);
-      mediaRecorder.onstop = () => {
-        clearInterval(drawTimer);
-        const url = downloadBlob(recordedChunks, "webm");
-        finalize(url, displayStream, canvasStream);
+      function finalize(objUrl, ...streams) {
+        setTimeout(() => URL.revokeObjectURL(objUrl), 0);
+        streams.forEach((s) => s?.getTracks?.().forEach((tr) => tr.stop()));
         if (typeof window.__qsr_reset === "function")
           setTimeout(() => window.__qsr_reset(), 0);
-      };
-
-      mediaRecorder.start();
-      if (durationMs)
-        setTimeout(
-          () => {
-            mediaRecorder.state === "recording" && mediaRecorder.stop();
-            $start.disabled = false;
-            $stop.disabled = true;
-          },
-          durationMs
-        );
-      displayStream.getVideoTracks()[0].onended = () =>
-        mediaRecorder.state === "recording" && mediaRecorder.stop();
-
-      return () => {
-        if (mediaRecorder.state === "recording") mediaRecorder.stop();
-      };
-    } catch (err) {
-      console.error("recordScreen error:", err);
-      throw err;
+      }
     }
 
-    // ---- helpers ----
-    function pickMime() {
-      if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))
-        return "video/webm;codecs=vp9";
-      if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8"))
-        return "video/webm;codecs=vp8";
-      return "video/webm";
-    }
-
-    function waitForFirstFrame(stream) {
-      return new Promise((resolve) => {
-        const track = stream.getVideoTracks()[0];
-        if (!track) return resolve();
-        // Heuristic: give the track one rAF tick to deliver a frame
-        requestAnimationFrame(() => resolve());
-      });
-    }
-
-    function downloadBlob(chunks, ext = "webm") {
-      const blob = new Blob(chunks, { type: `video/${ext}` });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `eugene-extension-screen-recording-${new Date()
-        .toISOString()
-        .slice(0, 19)
-        .replace(/:/g, "-")}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      return url;
-    }
-
-    function finalize(objUrl, ...streams) {
-      setTimeout(() => URL.revokeObjectURL(objUrl), 0);
-      streams.forEach((s) => s?.getTracks?.().forEach((tr) => tr.stop()));
-    }
-  }
 })();
