@@ -100,11 +100,34 @@
       <div class="row">
         <label><input id="qsr-dedupe" type="checkbox" checked/> Skip mic if already in system</label>
       </div>
+      <div class="row">
+        <label><input id="qsr-mute-all" type="checkbox"/> Mute</label>
+      </div>
+      <!-- /NEW -->
+      <div class="row">
+        <label title="Shows your webcam inside the final recorded video">
+          <input id="qsr-cam-overlay" type="checkbox"/> Overlay camera
+        </label>
+
+        <label title="Floating preview window. May appear in recording if you share entire screen">
+          <input id="qsr-cam-pip" type="checkbox"/> PiP preview
+        </label>
+
+        <label title="Size of the round overlay camera in the final video">
+          Size <input id="qsr-cam-size" type="number" value="220" min="80" max="600" style="width:70px"/>
+        </label>
+      </div>
+      <div class="row" id="qsr-cam-select-row" style="display:none">
+        <label title="Choose which camera will be used when recording starts">
+          Camera:
+          <select id="qsr-cam-device"></select>
+        </label>
+      </div>
       <!-- /NEW -->
 
       <div class="row">
         <button id="qsr-start" class="btn primary">Start</button>
-        <button id="qsr-stop" class="btn danger" disabled>Stop</button>
+        <button id="qsr-stop" style="cursor:not-allowed" class="btn danger" disabled>Stop</button>
       </div>
 
       <div id="qsr-note">Tip: You can move the round button. Position persists per site.</div>
@@ -124,7 +147,12 @@
   const $fy = $("#qsr-fy");
   const $start = $("#qsr-start");
   const $stop = $("#qsr-stop");
-
+  const $muteAll = $("#qsr-mute-all");
+  const $camSize = $("#qsr-cam-size");
+  const $camOverlay = $("#qsr-cam-overlay");
+  const $camPip = $("#qsr-cam-pip");
+  const $camDeviceRow = $("#qsr-cam-select-row");
+  const $camDevice = $("#qsr-cam-device");
   // NEW: audio controls
   const $audioSrc = $("#qsr-audio-src");
   const $sGain = $("#qsr-sgain");
@@ -198,7 +226,22 @@
       window.addEventListener("mousemove", mm);
       window.addEventListener("mouseup", mu);
     });
-
+    $camOverlay.addEventListener("change", async () => {
+      if ($camPip.checked || $camOverlay.checked) {
+        $camDeviceRow.style.display = "flex";
+        await loadCameraList();
+      } else {
+        $camDeviceRow.style.display = "none";
+      }
+    });
+    $camPip.addEventListener("change", async () => {
+      if ($camPip.checked || $camOverlay.checked) {
+        $camDeviceRow.style.display = "flex";
+        await loadCameraList();
+      } else {
+        $camDeviceRow.style.display = "none";
+      }
+    });
     $toggle.addEventListener("click", (e) => {
       if (e.detail === 0) return; // keyboard?
       if ($toggle.classList.contains("dragging")) return;
@@ -207,6 +250,30 @@
       togglePanel();
     });
   })();
+  async function loadCameraList() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === "videoinput");
+
+      $camDevice.innerHTML = "";
+
+      cams.forEach((cam, i) => {
+        const opt = document.createElement("option");
+        opt.value = cam.deviceId;
+        opt.textContent = cam.label || `Camera ${i+1}`;
+        $camDevice.appendChild(opt);
+      });
+
+      if (cams.length === 0) {
+        const opt = document.createElement("option");
+        opt.textContent = "No camera found";
+        $camDevice.appendChild(opt);
+      }
+
+    } catch (e) {
+      console.warn("Could not enumerate cameras", e);
+    }
+  }
 
   const togglePanel = () => {
     if ($panel.classList.contains("open")) {
@@ -253,7 +320,7 @@
         : null;
 
       document.getElementById("qsr-widget").style.display = "none";
-      stopFn = await recordScreen(3, secs * 1000, zoom); // shorter countdown
+      stopFn = await recordScreen(3, secs * 1000, zoom, fps); // shorter countdown
       setTimeout(() => {
         document.getElementById("qsr-widget").style.display = "block";
       }, secs * 1000);
@@ -276,14 +343,109 @@
     $stop.disabled = true;
     $toggle.textContent = "⏺";
   };
+  async function createCompositedStream(screenStream, fps, enablePip=false, deviceId=null, enableOverlay=null) {
+    const video = document.createElement("video");
+    video.srcObject = screenStream;
+    video.playsInline = true;
+    await video.play();
+    let camStream = null;
+    if (deviceId) {
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined
+        }
+      });
+    } else {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    }
+    const camVideo = document.createElement("video");
+    camVideo.srcObject = camStream;
+    camVideo.playsInline = true;
+    await camVideo.play();
+    // ===== Picture in Picture live camera =====
+    // ===== Optional PiP preview =====
+    let pipActive = false;
 
+    if (enablePip && document.pictureInPictureEnabled) {
+      try {
+        camVideo.muted = true;
+        await camVideo.requestPictureInPicture();
+        pipActive = true;
+      } catch (e) {
+        console.log("PiP rejected by browser:", e);
+      }
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const track = screenStream.getVideoTracks()[0];
+    const settings = track.getSettings();
+    canvas.width = settings.width || 1920;
+    canvas.height = settings.height || 1080;
+
+    
+    let running = true;
+
+    function draw() {
+      if (!running) return;
+
+      const camSize = +$camSize.value || 220;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const padding = 20;
+      const x = canvas.width - camSize - padding;
+      const y = canvas.height - camSize - padding;
+
+    if (enableOverlay) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x + camSize/2, y + camSize/2, camSize/2, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(camVideo, x, y, camSize, camSize);
+      ctx.restore();
+    }
+
+      requestAnimationFrame(draw);
+    }
+
+
+    draw();
+
+    const composed = canvas.captureStream(fps);
+
+
+    function stopAll() {
+      running = false;
+      camStream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      camVideo.srcObject = null;
+
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(()=>{});
+      }
+    }
+
+    return {
+      stream: new MediaStream([composed.getVideoTracks()[0]]),
+      stop: stopAll
+    };
+  }
+  const session = {
+    displayStream: null,
+    micStream: null,
+    cameraStop: null,
+    audioCtx: null,
+    finalStream: null
+  };
   // -------------------------
   // Robust recordScreen impl (with full audio capture + NEW audio UI)
   // -------------------------
-  async function recordScreen(countdown, durationMs = null, zoom = null) {
+  async function recordScreen(countdown, durationMs = null, zoom = null, fps = 30) {
     let mediaRecorder;
     let recordedChunks = [];
-
+    let cameraCleanup = null;
     const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
     // NEW: read audio options
@@ -295,11 +457,11 @@
     const compRa = +$compRa.value || 10;
     const compKn = +$compKn.value || 25;
     const dedupeMic = $dedupe.checked;
-
+    const selectedCameraId = $camDevice.value || null;
     try {
       // 1️⃣ Ask the user what to capture (with system/tab audio based on mode)
-      const wantSystem = audioMode === "system" || audioMode === "both";
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+      const wantSystem = (!$camPip.checked && !camOverlay.checked) && (audioMode === "system" || audioMode === "both");
+      let displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           frameRate: 30,
           displaySurface: "browser",
@@ -308,6 +470,25 @@
         },
         audio: wantSystem ? { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 } : false,
       });
+      const rawDisplayStream = displayStream;
+      const enableOverlay = $camOverlay.checked;
+      const enablePip = $camPip.checked;
+      session.displayStream = displayStream;
+
+      if (enableOverlay || enablePip) {
+        console.log("📷 Camera overlay enabled");
+
+        const originalAudioTracks = displayStream.getAudioTracks();
+        const composed = await createCompositedStream(displayStream, fps, enablePip, selectedCameraId, enableOverlay);
+
+        displayStream = new MediaStream([
+          ...composed.stream.getVideoTracks(),
+          ...originalAudioTracks
+        ]);
+
+        // cameraCleanup = composed.stop;
+        session.cameraStop = composed.stop;
+      }
 
       // 2️⃣ Capture mic separately (only if needed)
       const wantMic = audioMode === "mic" || audioMode === "both";
@@ -317,9 +498,10 @@
           audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
         });
       }
+      session.micStream = micStream;
 
       // 3️⃣ Detect duplicate mic in system audio
-      const systemTracks = displayStream.getAudioTracks();
+      const systemTracks = rawDisplayStream.getAudioTracks();
       const systemTrack = systemTracks.length > 0 ? systemTracks[0] : null;
 
       let micInSystem = false;
@@ -337,7 +519,8 @@
       }
 
       // 4️⃣ Mix with AudioContext
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      session.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioCtx = session.audioCtx;
       const destination = audioCtx.createMediaStreamDestination();
 
       let anyAudio = false;
@@ -355,7 +538,7 @@
 
       // System chain
       if (wantSystem && systemTrack) {
-        const sysSource = audioCtx.createMediaStreamSource(displayStream);
+        const sysSource = audioCtx.createMediaStreamSource(rawDisplayStream);
         const sysGain = audioCtx.createGain();
         sysGain.gain.value = sysGainVal; // NEW: UI gain
 
@@ -387,10 +570,16 @@
 
       // 5️⃣ Combine video + mixed audio
       const finalTracks = [...displayStream.getVideoTracks()];
-      if (anyAudio) {
+
+      const muteAll = $muteAll.checked;
+
+      if (!muteAll && anyAudio) {
         finalTracks.push(...destination.stream.getAudioTracks());
+      } else {
+        console.log("🔇 Recording muted — no audio track added");
       }
       const finalStream = new MediaStream(finalTracks);
+      session.finalStream = finalStream;
 
       console.log("🎬 Final mixed stream tracks:");
       finalStream.getAudioTracks().forEach((t) =>
@@ -434,7 +623,8 @@
       mediaRecorder.ondataavailable = (e) =>
         e.data.size && recordedChunks.push(e.data);
       mediaRecorder.onstop = () => {
-        finalize(downloadBlob(recordedChunks, "webm"), finalStream);
+        const url = downloadBlob(recordedChunks, "webm");
+        finalize(url);
         $start.disabled = false;
         $stop.disabled = true;
         $toggle.textContent = "⏺";
@@ -502,11 +692,23 @@
       return url;
     }
 
-    function finalize(objUrl, ...streams) {
+    function finalize(objUrl) {
+
       setTimeout(() => URL.revokeObjectURL(objUrl), 0);
-      streams.forEach((s) => s?.getTracks?.().forEach((tr) => tr.stop()));
+
+      try { session.finalStream?.getTracks().forEach(t => t.stop()); } catch {}
+      try { session.displayStream?.getTracks().forEach(t => t.stop()); } catch {}
+      try { session.micStream?.getTracks().forEach(t => t.stop()); } catch {}
+      try { session.cameraStop?.(); } catch {}
+      try { session.audioCtx?.close(); } catch {}
+
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(()=>{});
+      }
+
       if (typeof window.__qsr_reset === "function")
         setTimeout(() => window.__qsr_reset(), 0);
     }
+
   }
 })();
