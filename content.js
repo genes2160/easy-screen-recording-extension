@@ -38,12 +38,12 @@
   }
   #qsr-panel.open { display:block; }
   #qsr-panel h4 { margin:0 0 8px; font-size: 14px; letter-spacing:.2px; }
-  #qsr-panel .row { display:flex; gap:8px; margin:8px 0; align-items:center; }
-  #qsr-panel label { font-size: 12px; opacity:.85; }
-  #qsr-panel input[type="number"] {
-    width: 90px; padding:6px 8px; border-radius:6px; border:1px solid #333; background:#181818; color:#eee;
+  #qsr-panel .row { display:flex; gap:8px; margin:8px 0; align-items:center; flex-wrap: wrap; }
+  #qsr-panel label { font-size: 12px; opacity:.85; display:flex; align-items:center; gap:6px; }
+  #qsr-panel input[type="number"], #qsr-panel select {
+    padding:6px 8px; border-radius:6px; border:1px solid #333; background:#181818; color:#eee;
   }
-  #qsr-panel input[type="checkbox"] { transform: translateY(1px); }
+  #qsr-panel input[type="number"] { width: 82px; }
   #qsr-panel .btn {
     flex:1;
     padding:8px 10px; border-radius:8px; border:1px solid #444; background:#1f2937; color:#eee; cursor:pointer;
@@ -67,19 +67,40 @@
       <div class="row">
         <label for="qsr-secs">Duration (s)</label>
         <input id="qsr-secs" type="number" min="1" step="1" value="10" />
+        <label>FPS <input id="qsr-fps" type="number" min="10" max="60" step="1" value="30" style="width:60px"/></label>
       </div>
 
       <div class="row">
         <label><input id="qsr-zoom-on" type="checkbox" /> Zoom</label>
         <label>From <input id="qsr-zs" type="number" min="1" step="0.1" value="1" style="width:56px"/></label>
         <label>To <input id="qsr-ze" type="number" min="1" step="0.1" value="1.4" style="width:56px"/></label>
-      </div>
-
-      <div class="row">
-        <label>FPS <input id="qsr-fps" type="number" min="10" max="60" step="1" value="30" style="width:56px"/></label>
         <label>FocusX <input id="qsr-fx" type="number" min="0" max="1" step="0.01" value="0.5" style="width:60px"/></label>
         <label>FocusY <input id="qsr-fy" type="number" min="0" max="1" step="0.01" value="0.5" style="width:60px"/></label>
       </div>
+
+      <!-- NEW: Audio source & processing controls -->
+      <div class="row">
+        <label>Audio
+          <select id="qsr-audio-src">
+            <option value="system">System only</option>
+            <option value="mic">Mic only</option>
+            <option value="both" selected>Both</option>
+          </select>
+        </label>
+        <label>Sys Gain <input id="qsr-sgain" type="number" step="0.1" min="0" value="3.0"/></label>
+        <label>Mic Gain <input id="qsr-mgain" type="number" step="0.1" min="0" value="1.0"/></label>
+      </div>
+
+      <div class="row">
+        <label><input id="qsr-comp" type="checkbox" checked /> Compressor</label>
+        <label>Thresh <input id="qsr-comp-th" type="number" step="1" min="-60" max="0" value="-15"/></label>
+        <label>Ratio <input id="qsr-comp-ra" type="number" step="1" min="1" max="20" value="10"/></label>
+        <label>Knee <input id="qsr-comp-kn" type="number" step="1" min="0" max="40" value="25"/></label>
+      </div>
+      <div class="row">
+        <label><input id="qsr-dedupe" type="checkbox" checked/> Skip mic if already in system</label>
+      </div>
+      <!-- /NEW -->
 
       <div class="row">
         <button id="qsr-start" class="btn primary">Start</button>
@@ -103,6 +124,16 @@
   const $fy = $("#qsr-fy");
   const $start = $("#qsr-start");
   const $stop = $("#qsr-stop");
+
+  // NEW: audio controls
+  const $audioSrc = $("#qsr-audio-src");
+  const $sGain = $("#qsr-sgain");
+  const $mGain = $("#qsr-mgain");
+  const $comp = $("#qsr-comp");
+  const $compTh = $("#qsr-comp-th");
+  const $compRa = $("#qsr-comp-ra");
+  const $compKn = $("#qsr-comp-kn");
+  const $dedupe = $("#qsr-dedupe");
 
   // Position persistence
   const domainKey = `qsr-pos-${location.hostname}`;
@@ -222,14 +253,11 @@
         : null;
 
       document.getElementById("qsr-widget").style.display = "none";
-      stopFn = await recordScreen(10, secs * 1000, zoom);
-      //hide the button till the timeout is over.....
+      stopFn = await recordScreen(3, secs * 1000, zoom); // shorter countdown
       setTimeout(() => {
         document.getElementById("qsr-widget").style.display = "block";
       }, secs * 1000);
-    } catch (err) {
-      // console.error(err);
-      // alert("Failed to start recording. Check console.");
+    } catch (error) {
       console.log("Failed to start recording. Check console.", error);
       document.getElementById("qsr-widget").style.display = "block";
       $start.disabled = false;
@@ -249,195 +277,236 @@
     $toggle.textContent = "⏺";
   };
 
-    // -------------------------
-    // Robust recordScreen impl (with full audio capture)
-    // -------------------------
-    async function recordScreen(countdown, durationMs = null, zoom = null) {
-      let mediaRecorder;
-      let recordedChunks = [];
+  // -------------------------
+  // Robust recordScreen impl (with full audio capture + NEW audio UI)
+  // -------------------------
+  async function recordScreen(countdown, durationMs = null, zoom = null) {
+    let mediaRecorder;
+    let recordedChunks = [];
 
-      const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+    const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
-      try {
-        // 1️⃣ Ask the user what to capture (with system/tab audio)
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            frameRate: 30,
-            displaySurface: "browser",
-            surfaceSwitching: "include",
-            selfBrowserSurface: "include",
-          },
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            sampleRate: 44100,
-          },
+    // NEW: read audio options
+    const audioMode = $audioSrc.value;           // "system" | "mic" | "both"
+    const sysGainVal = Math.max(0, +$sGain.value || 1.0);
+    const micGainVal = Math.max(0, +$mGain.value || 1.0);
+    const useComp = $comp.checked;
+    const compTh = +$compTh.value || -15;
+    const compRa = +$compRa.value || 10;
+    const compKn = +$compKn.value || 25;
+    const dedupeMic = $dedupe.checked;
+
+    try {
+      // 1️⃣ Ask the user what to capture (with system/tab audio based on mode)
+      const wantSystem = audioMode === "system" || audioMode === "both";
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: 30,
+          displaySurface: "browser",
+          surfaceSwitching: "include",
+          selfBrowserSurface: "include",
+        },
+        audio: wantSystem ? { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 } : false,
+      });
+
+      // 2️⃣ Capture mic separately (only if needed)
+      const wantMic = audioMode === "mic" || audioMode === "both";
+      let micStream = null;
+      if (wantMic) {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
         });
+      }
 
-        // 2️⃣ Capture mic separately
-        const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            sampleRate: 44100,
-          },
-        });
+      // 3️⃣ Detect duplicate mic in system audio
+      const systemTracks = displayStream.getAudioTracks();
+      const systemTrack = systemTracks.length > 0 ? systemTracks[0] : null;
 
-        // 3️⃣ Detect duplicate mic in system audio
+      let micInSystem = false;
+      if (wantMic && systemTrack && micStream) {
         const micTrack = micStream.getAudioTracks()[0];
-        const systemTracks = displayStream.getAudioTracks();
-        const systemTrack = systemTracks.length > 0 ? systemTracks[0] : null;
-
-        let micInSystem = false;
-        if (systemTrack) {
-          const sys = systemTrack.getSettings();
-          const mic = micTrack.getSettings();
-          if (sys.deviceId && mic.deviceId && sys.deviceId === mic.deviceId)
-            micInSystem = true;
+        try {
+          const sys = systemTrack.getSettings?.() || {};
+          const mic = micTrack?.getSettings?.() || {};
+          if (sys.deviceId && mic.deviceId && sys.deviceId === mic.deviceId) micInSystem = true;
           console.log("🎧 System audio settings:", sys);
-        }
-        console.log(micInSystem ? "⚠️ Mic already in system audio" : "✅ Mic separate");
+        } catch {}
+      }
+      if (micInSystem && dedupeMic && audioMode === "both") {
+        console.log("⚠️ Mic appears inside system audio — skipping extra mic due to dedupe setting.");
+      }
 
-        // 4️⃣ Mix with AudioContext
-        const audioCtx = new AudioContext();
-        const destination = audioCtx.createMediaStreamDestination();
+      // 4️⃣ Mix with AudioContext
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const destination = audioCtx.createMediaStreamDestination();
 
-        const sysSource =
-          systemTrack && systemTracks.length > 0
-            ? audioCtx.createMediaStreamSource(displayStream)
-            : null;
-        const micSource = audioCtx.createMediaStreamSource(micStream);
+      let anyAudio = false;
 
+      // Build optional compressor
+      const makeCompressor = () => {
+        const c = audioCtx.createDynamicsCompressor();
+        c.threshold.value = compTh;
+        c.knee.value = compKn;
+        c.ratio.value = compRa;
+        c.attack.value = 0.003;
+        c.release.value = 0.25;
+        return c;
+      };
+
+      // System chain
+      if (wantSystem && systemTrack) {
+        const sysSource = audioCtx.createMediaStreamSource(displayStream);
         const sysGain = audioCtx.createGain();
+        sysGain.gain.value = sysGainVal; // NEW: UI gain
+
+        if (useComp) {
+          const comp = makeCompressor();
+          sysSource.connect(sysGain).connect(comp).connect(destination);
+        } else {
+          sysSource.connect(sysGain).connect(destination);
+        }
+        anyAudio = true;
+      } else if (wantSystem && !systemTrack) {
+        console.warn("🔇 System audio not available from getDisplayMedia.");
+      }
+
+      // Mic chain
+      if (wantMic && micStream && !(micInSystem && dedupeMic && audioMode === "both")) {
+        const micSource = audioCtx.createMediaStreamSource(micStream);
         const micGain = audioCtx.createGain();
-        sysGain.gain.value = 1.0;
-        micGain.gain.value = 1.0;
+        micGain.gain.value = micGainVal; // NEW: UI gain
 
-        if (sysSource) sysSource.connect(sysGain).connect(destination);
-        if (!micInSystem) micSource.connect(micGain).connect(destination);
+        if (useComp) {
+          const comp = makeCompressor();
+          micSource.connect(micGain).connect(comp).connect(destination);
+        } else {
+          micSource.connect(micGain).connect(destination);
+        }
+        anyAudio = true;
+      }
 
-        // 5️⃣ Combine video + mixed audio
-        const finalStream = new MediaStream([
-          ...displayStream.getVideoTracks(),
-          ...destination.stream.getAudioTracks(),
-        ]);
+      // 5️⃣ Combine video + mixed audio
+      const finalTracks = [...displayStream.getVideoTracks()];
+      if (anyAudio) {
+        finalTracks.push(...destination.stream.getAudioTracks());
+      }
+      const finalStream = new MediaStream(finalTracks);
 
-        console.log("🎬 Final mixed stream tracks:");
-        finalStream.getAudioTracks().forEach((t) =>
-          console.log("Audio track:", t.label, t.getSettings())
-        );
+      console.log("🎬 Final mixed stream tracks:");
+      finalStream.getAudioTracks().forEach((t) =>
+        console.log("Audio track:", t.label, t.getSettings?.())
+      );
 
-        // ===== Countdown overlay =====
-        const overlay = document.createElement("div");
-        overlay.style.cssText = `
-          position:fixed;top:50%;left:50%;
-          transform:translate(-50%,-50%);
-          background:rgba(0,0,0,0.7);color:#fff;
-          padding:20px 40px;font-size:48px;border-radius:10px;
-          z-index:2147483647;font-family:Arial,sans-serif;`;
-        overlay.textContent = `Starting in ${countdown}s`;
-        document.body.appendChild(overlay);
+      // ===== Countdown overlay =====
+      const overlay = document.createElement("div");
+      overlay.style.cssText = `
+        position:fixed;top:50%;left:50%;
+        transform:translate(-50%,-50%);
+        background:rgba(0,0,0,0.7);color:#fff;
+        padding:20px 40px;font-size:48px;border-radius:10px;
+        z-index:2147483647;font-family:Arial,sans-serif;`;
+      overlay.textContent = `Starting in ${countdown}s`;
+      document.body.appendChild(overlay);
 
-        let overlayCountdown = countdown;
-        const overlayInterval = setInterval(() => {
-          overlayCountdown -= 1;
-          if (overlayCountdown > 0) {
-            overlay.textContent = overlayCountdown;
-          } else {
-            clearInterval(overlayInterval);
-            overlay.remove();
-          }
-        }, 1000);
-        await new Promise((r) => setTimeout(r, countdown * 1000));
-        if (overlay.parentNode) {
+      let overlayCountdown = countdown;
+      const overlayInterval = setInterval(() => {
+        overlayCountdown -= 1;
+        if (overlayCountdown > 0) {
+          overlay.textContent = overlayCountdown;
+        } else {
           clearInterval(overlayInterval);
           overlay.remove();
         }
-
-        // ============ Recording logic ============
-        const mime = pickMime();
-        mediaRecorder = new MediaRecorder(finalStream, {
-          mimeType: mime,
-          audioBitsPerSecond: 128000,
-        });
-
-        mediaRecorder.ondataavailable = (e) =>
-          e.data.size && recordedChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-          finalize(downloadBlob(recordedChunks, "webm"), finalStream);
-          $start.disabled = false;
-          $stop.disabled = true;
-          $toggle.textContent = "⏺";
-          console.log("✅ Recording stopped, UI reset.");
-          if (typeof window.__qsr_reset === "function")
-            setTimeout(() => window.__qsr_reset(), 0);
-        }
-
-        // optional warm-up
-        await waitForFirstFrame(finalStream);
-
-        mediaRecorder.start();
-        if (durationMs) {
-            setTimeout(() => {
-              if (mediaRecorder.state === "recording") {
-                console.log("⏹️ Duration reached — stopping recording");
-                mediaRecorder.stop();
-              }
-            }, durationMs);
-        }
-
-        // 🟥 Handle manual user stop (video track end)
-        finalStream.getVideoTracks()[0].onended = () => {
-          if (mediaRecorder.state === "recording") {
-            console.log("🎞️ Video stream ended — stopping recording");
-            mediaRecorder.stop();
-          }
-        };
-        return () => {
-            if (mediaRecorder.state === "recording") {
-              console.log("🛑 Manual stop triggered");
-              mediaRecorder.stop();
-            }
-        };
-      } catch (err) {
-        console.error("recordScreen error:", err);
-        throw err;
+      }, 1000);
+      await new Promise((r) => setTimeout(r, countdown * 1000));
+      if (overlay.parentNode) {
+        clearInterval(overlayInterval);
+        overlay.remove();
       }
 
-      // ---- helpers ----
-      function pickMime() {
-        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))
-          return "video/webm;codecs=vp9";
-        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8"))
-          return "video/webm;codecs=vp8";
-        return "video/webm";
-      }
+      // ============ Recording logic ============
+      const mime = pickMime();
+      mediaRecorder = new MediaRecorder(finalStream, {
+        mimeType: mime,
+        audioBitsPerSecond: 128000,
+      });
 
-      function waitForFirstFrame(stream) {
-        return new Promise((resolve) => requestAnimationFrame(resolve));
-      }
-
-      function downloadBlob(chunks, ext = "webm") {
-        const blob = new Blob(chunks, { type: `video/${ext}` });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `eugene-extension-screen-recording-${new Date()
-          .toISOString()
-          .slice(0, 19)
-          .replace(/:/g, "-")}.${ext}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        return url;
-      }
-
-      function finalize(objUrl, ...streams) {
-        setTimeout(() => URL.revokeObjectURL(objUrl), 0);
-        streams.forEach((s) => s?.getTracks?.().forEach((tr) => tr.stop()));
+      mediaRecorder.ondataavailable = (e) =>
+        e.data.size && recordedChunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        finalize(downloadBlob(recordedChunks, "webm"), finalStream);
+        $start.disabled = false;
+        $stop.disabled = true;
+        $toggle.textContent = "⏺";
+        console.log("✅ Recording stopped, UI reset.");
         if (typeof window.__qsr_reset === "function")
           setTimeout(() => window.__qsr_reset(), 0);
       }
+
+      // optional warm-up
+      await waitForFirstFrame(finalStream);
+
+      mediaRecorder.start();
+      if (durationMs) {
+        setTimeout(() => {
+          if (mediaRecorder.state === "recording") {
+            console.log("⏹️ Duration reached — stopping recording");
+            mediaRecorder.stop();
+          }
+        }, durationMs);
+      }
+
+      // 🟥 Handle manual user stop (video track end)
+      finalStream.getVideoTracks()[0].onended = () => {
+        if (mediaRecorder.state === "recording") {
+          console.log("🎞️ Video stream ended — stopping recording");
+          mediaRecorder.stop();
+        }
+      };
+      return () => {
+        if (mediaRecorder.state === "recording") {
+          console.log("🛑 Manual stop triggered");
+          mediaRecorder.stop();
+        }
+      };
+    } catch (err) {
+      console.error("recordScreen error:", err);
+      throw err;
     }
 
+    // ---- helpers ----
+    function pickMime() {
+      if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9"))
+        return "video/webm;codecs=vp9";
+      if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8"))
+        return "video/webm;codecs=vp8";
+      return "video/webm";
+    }
+
+    function waitForFirstFrame() {
+      return new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+
+    function downloadBlob(chunks, ext = "webm") {
+      const blob = new Blob(chunks, { type: `video/${ext}` });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `eugene-extension-screen-recording-${new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace(/:/g, "-")}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return url;
+    }
+
+    function finalize(objUrl, ...streams) {
+      setTimeout(() => URL.revokeObjectURL(objUrl), 0);
+      streams.forEach((s) => s?.getTracks?.().forEach((tr) => tr.stop()));
+      if (typeof window.__qsr_reset === "function")
+        setTimeout(() => window.__qsr_reset(), 0);
+    }
+  }
 })();
