@@ -2,39 +2,185 @@
 
 ## Overview
 
-Floatable Recorder is a browser extension designed to provide a simple and accessible way to record audio directly from your browser. The extension features a floating, draggable interface that allows you to start, pause, and stop recordings without interrupting your workflow.
+**Floatable Recorder** is a lightweight floating browser recorder that lets you capture your screen, system audio, microphone, and webcam — all from a movable on-page control panel.
+
+Unlike traditional screen recorders that interrupt your workflow, Floatable Recorder lives directly inside the page as a draggable widget. You can record tutorials, walkthroughs, meetings, or demos while continuing to use the browser normally.
+
+The recorder supports webcam overlays, Picture-in-Picture preview, selectable camera devices, audio mixing, and smooth mouse-follow zoom for cinematic recordings.
+
+---
 
 ## Purpose
 
-The main purpose of Floatable Recorder is to make audio recording quick and convenient for users who need to capture voice notes, meetings, lectures, or any other audio directly from their browser. Its floating design ensures it stays accessible while you browse or work on other tasks.
+Floatable Recorder is designed to make browser recording frictionless:
+
+* No switching tabs or opening external apps
+* Always accessible floating controls
+* Clean recordings with optional camera presence
+* Balanced audio from mic + system sound
+* Professional-style focus tracking (mouse follow zoom)
+
+It is ideal for:
+
+* Tutorials & walkthrough videos
+* Product demos
+* Bug reporting
+* Teaching & lectures
+* Explaining designs to clients
+* Quick screen messages
+
+---
 
 ## How to Use
 
-1. **Install the Extension**  
-    Download and install Floatable Recorder from your browser's extension store.
+### 1. Install the Extension
 
-2. **Launch the Recorder**  
-    Click the extension icon in your browser toolbar. The floating recorder interface will appear.
+Install Floatable Recorder from your browser’s extension store.
 
-3. **Start Recording**  
-    Press the "Record" button to begin capturing audio.
+---
 
-4. **Pause/Resume Recording**  
-    Use the "Pause" button to temporarily stop recording, and "Resume" to continue.
+### 2. Open the Recorder
 
-5. **Stop and Save**  
-    Click "Stop" to end the recording. You will be prompted to save your audio file.
+A small floating record button appears on the page.
+Click it to open the control panel.
 
-6. **Move the Recorder**  
-    Drag the floating window to position it anywhere on your screen for convenience.
+You can drag the button anywhere — its position is remembered per-site.
+
+---
+
+### 3. Configure Recording
+
+Before recording, you can customize:
+
+**Recording**
+
+* Duration
+* FPS
+* Optional zoom behavior
+
+**Audio Source**
+
+* System audio only
+* Microphone only
+* Both mixed together
+* Individual gain levels
+* Compressor (for clearer speech)
+* Mute recording entirely
+
+**Camera**
+
+* Overlay camera (recorded into video)
+* PiP preview window (for you to see yourself)
+* Choose camera device
+* Adjust overlay size
+
+---
+
+### 4. Start Recording
+
+Press **Start** and choose what to share:
+
+* Browser tab
+* Window
+* Entire screen
+
+A short countdown appears, then recording begins.
+
+---
+
+### 5. During Recording
+
+You can:
+
+* Stop recording anytime
+* Move mouse to guide automatic zoom focus
+* Use PiP preview to monitor yourself
+* Continue browsing normally
+
+---
+
+### 6. Finish Recording
+
+When recording ends:
+
+* Video downloads automatically
+* All camera, microphone, and screen capture streams are safely closed
+
+---
+
+## Camera Modes
+
+Floatable Recorder separates **preview** from **recorded camera**:
+
+| Mode          | Result                                                               |
+| ------------- | -------------------------------------------------------------------- |
+| Overlay only  | Webcam appears inside final video                                    |
+| PiP only      | Floating preview visible to you (may appear if entire screen shared) |
+| Overlay + PiP | Both preview and recorded camera                                     |
+| Off           | Screen-only recording                                                |
+
+You can also choose which camera device to use before recording begins.
+
+---
+
+## Mouse Follow Zoom
+
+The recorder includes cinematic focus tracking:
+
+* Camera smoothly follows cursor
+* Zoom increases when idle
+* Zoom relaxes when moving fast
+* Motion is stabilized to avoid shaking
+* Edges are automatically handled
+
+This produces natural, tutorial-style recordings without manual editing.
+
+---
 
 ## Features
 
-- Floating, draggable interface
-- Easy start, pause, resume, and stop controls
-- Save recordings locally
-- Minimal and user-friendly design
+### Core
+
+* Floating draggable recorder UI
+* Screen recording (tab, window, or full display)
+* Local download after recording
+
+### Audio
+
+* System audio capture
+* Microphone capture
+* Mixed audio recording
+* Gain controls
+* Compressor for speech clarity
+* Optional mute
+
+### Camera
+
+* Webcam overlay recording
+* Picture-in-Picture preview
+* Select camera device
+* Adjustable overlay size
+
+### Smart Recording
+
+* Smooth mouse-follow zoom
+* Countdown start
+* Automatic cleanup after recording
+* Per-site UI position memory
+
+---
+
+## Privacy
+
+Floatable Recorder only records after you explicitly press **Start** and select a screen to share.
+
+No recording happens in the background.
+All recordings are saved locally to your device.
+
+---
 
 ## Support
 
-For help or feedback, please contact the developer or visit the extension's support page.
+For help, feature requests, or bug reports, contact the developer or visit the extension support page.
+
+---
