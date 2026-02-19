@@ -460,7 +460,7 @@
     const selectedCameraId = $camDevice.value || null;
     try {
       // 1️⃣ Ask the user what to capture (with system/tab audio based on mode)
-      const wantSystem = (!$camPip.checked && !camOverlay.checked) && (audioMode === "system" || audioMode === "both");
+      const wantSystem = (!$camPip.checked && !$camOverlay.checked) && (audioMode === "system" || audioMode === "both");
       let displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           frameRate: 30,
