@@ -1,9 +1,37 @@
 // ============================
 // content.js (single file)
 // ============================
+// =============================
+// Site blocking system
+// =============================
 
+const BLOCK_KEY = "qsr-blocked-sites";
+const host = location.hostname;
+
+async function getBlockedSites() {
+  return new Promise((resolve) => {
+    chrome?.storage?.local?.get?.([BLOCK_KEY], (res) => {
+      resolve(res?.[BLOCK_KEY] || []);
+    });
+  });
+}
+
+async function saveBlockedSites(list) {
+  return new Promise((resolve) => {
+    chrome?.storage?.local?.set?.({ [BLOCK_KEY]: list }, resolve);
+  });
+}
+
+// Prevent widget loading if site blocked
+(async () => {
+  const blocked = await getBlockedSites();
+  if (blocked.includes(host)) {
+    console.log("🚫 Screen recorder disabled on this site:", host);
+    window.__qsrBlocked = true;
+  }
+})();
 (() => {
-  if (window.__screenRecorderInjected) return;
+  if (window.__screenRecorderInjected || window.__qsrBlocked) return;
   window.__screenRecorderInjected = true;
 
   // -------------------------
@@ -260,7 +288,7 @@
       cams.forEach((cam, i) => {
         const opt = document.createElement("option");
         opt.value = cam.deviceId;
-        opt.textContent = cam.label || `Camera ${i+1}`;
+        opt.textContent = cam.label || `Camera ${i + 1}`;
         $camDevice.appendChild(opt);
       });
 
@@ -308,15 +336,15 @@
 
       const zoom = useZoom
         ? {
-            start: Math.max(1, +$zs.value || 1),
-            end: Math.max(1, +$ze.value || 1.4),
-            duration: Math.min(secs * 1000, 60000), // cap zoom anim to 60s
-            fps,
-            focus: {
-              x: Math.max(0, Math.min(1, +$fx.value || 0.5)),
-              y: Math.max(0, Math.min(1, +$fy.value || 0.5)),
-            },
-          }
+          start: Math.max(1, +$zs.value || 1),
+          end: Math.max(1, +$ze.value || 1.4),
+          duration: Math.min(secs * 1000, 60000), // cap zoom anim to 60s
+          fps,
+          focus: {
+            x: Math.max(0, Math.min(1, +$fx.value || 0.5)),
+            y: Math.max(0, Math.min(1, +$fy.value || 0.5)),
+          },
+        }
         : null;
 
       document.getElementById("qsr-widget").style.display = "none";
@@ -343,7 +371,7 @@
     $stop.disabled = true;
     $toggle.textContent = "⏺";
   };
-  async function createCompositedStream(screenStream, fps, enablePip=false, deviceId=null, enableOverlay=null) {
+  async function createCompositedStream(screenStream, fps, enablePip = false, deviceId = null, enableOverlay = null) {
     const video = document.createElement("video");
     video.srcObject = screenStream;
     video.playsInline = true;
@@ -384,7 +412,7 @@
     canvas.width = settings.width || 1920;
     canvas.height = settings.height || 1080;
 
-    
+
     let running = true;
 
     function draw() {
@@ -398,14 +426,14 @@
       const x = canvas.width - camSize - padding;
       const y = canvas.height - camSize - padding;
 
-    if (enableOverlay) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x + camSize/2, y + camSize/2, camSize/2, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(camVideo, x, y, camSize, camSize);
-      ctx.restore();
-    }
+      if (enableOverlay) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x + camSize / 2, y + camSize / 2, camSize / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(camVideo, x, y, camSize, camSize);
+        ctx.restore();
+      }
 
       requestAnimationFrame(draw);
     }
@@ -423,7 +451,7 @@
       camVideo.srcObject = null;
 
       if (document.pictureInPictureElement) {
-        document.exitPictureInPicture().catch(()=>{});
+        document.exitPictureInPicture().catch(() => { });
       }
     }
 
@@ -460,7 +488,7 @@
     const selectedCameraId = $camDevice.value || null;
     try {
       // 1️⃣ Ask the user what to capture (with system/tab audio based on mode)
-      const wantSystem = (!$camPip.checked && !camOverlay.checked) && (audioMode === "system" || audioMode === "both");
+      const wantSystem = (!$camPip.checked && !$camOverlay.checked) && (audioMode === "system" || audioMode === "both");
       let displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           frameRate: 30,
@@ -512,7 +540,7 @@
           const mic = micTrack?.getSettings?.() || {};
           if (sys.deviceId && mic.deviceId && sys.deviceId === mic.deviceId) micInSystem = true;
           console.log("🎧 System audio settings:", sys);
-        } catch {}
+        } catch { }
       }
       if (micInSystem && dedupeMic && audioMode === "both") {
         console.log("⚠️ Mic appears inside system audio — skipping extra mic due to dedupe setting.");
@@ -696,14 +724,14 @@
 
       setTimeout(() => URL.revokeObjectURL(objUrl), 0);
 
-      try { session.finalStream?.getTracks().forEach(t => t.stop()); } catch {}
-      try { session.displayStream?.getTracks().forEach(t => t.stop()); } catch {}
-      try { session.micStream?.getTracks().forEach(t => t.stop()); } catch {}
-      try { session.cameraStop?.(); } catch {}
-      try { session.audioCtx?.close(); } catch {}
+      try { session.finalStream?.getTracks().forEach(t => t.stop()); } catch { }
+      try { session.displayStream?.getTracks().forEach(t => t.stop()); } catch { }
+      try { session.micStream?.getTracks().forEach(t => t.stop()); } catch { }
+      try { session.cameraStop?.(); } catch { }
+      try { session.audioCtx?.close(); } catch { }
 
       if (document.pictureInPictureElement) {
-        document.exitPictureInPicture().catch(()=>{});
+        document.exitPictureInPicture().catch(() => { });
       }
 
       if (typeof window.__qsr_reset === "function")
@@ -712,3 +740,143 @@
 
   }
 })();
+
+// =============================
+// Keyboard shortcuts
+// =============================
+
+document.addEventListener("keydown", async (e) => {
+
+  if (!e.shiftKey) return;
+
+  const key = e.key.toLowerCase();
+
+  const blocked = await getBlockedSites();
+
+  // CTRL+SHIFT+B → block current site
+  if (key === "b") {
+
+    if (!blocked.includes(host)) {
+      blocked.push(host);
+      await saveBlockedSites(blocked);
+      alert(`🚫 Recorder disabled on:\n${host}\n\nReload page.`);
+    } else {
+      alert("Site already blocked.");
+    }
+
+  }
+
+  // CTRL+SHIFT+R → restore site
+  if (key === "r") {
+
+    const newList = blocked.filter(s => s !== host);
+    await saveBlockedSites(newList);
+
+    alert(`✅ Recorder restored on:\n${host}\n\nReload page.`);
+  }
+
+  // CTRL+SHIFT+L → show blocked sites list
+  if (key === "l") {
+
+    showBlockedSitesModal(blocked);
+
+  }
+
+});
+
+function showBlockedSitesModal(list) {
+
+  const modal = document.createElement("div");
+
+  modal.style.cssText = `
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.6);
+    z-index:2147483647;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:sans-serif;
+  `;
+
+  const box = document.createElement("div");
+
+  box.style.cssText = `
+    background:#111;
+    color:#fff;
+    padding:20px;
+    border-radius:10px;
+    width:320px;
+    max-height:400px;
+    overflow:auto;
+  `;
+
+  box.innerHTML = `
+    <h3 style="margin-top:0">Blocked Sites</h3>
+    <div id="qsr-blocked-list"></div>
+    <button id="qsr-close-modal" style="
+      margin-top:12px;
+      padding:6px 10px;
+      background:#2563eb;
+      border:none;
+      color:white;
+      border-radius:6px;
+      cursor:pointer;
+    ">Close</button>
+  `;
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+
+  const listBox = box.querySelector("#qsr-blocked-list");
+
+  if (list.length === 0) {
+    listBox.innerHTML = "<i>No blocked sites</i>";
+  } else {
+    list.forEach(site => {
+
+      const row = document.createElement("div");
+
+      row.style.cssText = `
+        display:flex;
+        justify-content:space-between;
+        padding:6px 0;
+        border-bottom:1px solid #333;
+      `;
+
+      row.innerHTML = `
+        <span>${site}</span>
+        <button data-site="${site}" style="
+          background:#b91c1c;
+          border:none;
+          color:#fff;
+          padding:4px 8px;
+          border-radius:5px;
+          cursor:pointer;
+        ">Remove</button>
+      `;
+
+      listBox.appendChild(row);
+    });
+  }
+
+  box.querySelectorAll("button[data-site]").forEach(btn => {
+
+    btn.onclick = async () => {
+
+      const site = btn.dataset.site;
+
+      const blocked = await getBlockedSites();
+
+      const updated = blocked.filter(s => s !== site);
+
+      await saveBlockedSites(updated);
+
+      btn.parentElement.remove();
+    };
+
+  });
+
+  box.querySelector("#qsr-close-modal").onclick = () => modal.remove();
+
+}
