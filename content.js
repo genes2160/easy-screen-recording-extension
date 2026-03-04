@@ -6,14 +6,25 @@
 // =============================
 
 const BLOCK_KEY = "qsr-blocked-sites";
-const host = location.hostname;
+const host = location.origin;
 
 async function getBlockedSites() {
-  return new Promise((resolve) => {
-    chrome?.storage?.local?.get?.([BLOCK_KEY], (res) => {
-      resolve(res?.[BLOCK_KEY] || []);
-    });
-  });
+
+  try {
+    if (!chrome?.runtime?.id) return [];
+    if (!chrome?.storage?.local) return [];
+
+    const res = await chrome.storage.local.get([BLOCK_KEY]);
+
+    return res?.[BLOCK_KEY] || [];
+
+  } catch (err) {
+
+    console.warn("Extension context invalidated:", err);
+    return [];
+
+  }
+
 }
 
 async function saveBlockedSites(list) {
@@ -22,16 +33,36 @@ async function saveBlockedSites(list) {
   });
 }
 
-// Prevent widget loading if site blocked
-(async () => {
+function showToast(message) {
+
+  let toast = document.getElementById("qsr-toast");
+
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "qsr-toast";
+    document.body.appendChild(toast);
+  }
+
+  toast.textContent = message;
+  toast.classList.add("show");
+
+  clearTimeout(toast.__hideTimer);
+
+  toast.__hideTimer = setTimeout(() => {
+    toast.classList.remove("show");
+  }, 2500);
+}
+
+
+(async() => {
   const blocked = await getBlockedSites();
+  // Prevent widget loading if site blocked
   if (blocked.includes(host)) {
     console.log("🚫 Screen recorder disabled on this site:", host);
-    window.__qsrBlocked = true;
+    showToast(`🚫 Screen recorder disabled on this site ${host}`);
+    return;
   }
-})();
-(() => {
-  if (window.__screenRecorderInjected || window.__qsrBlocked) return;
+  if (window.__screenRecorderInjected) return;
   window.__screenRecorderInjected = true;
 
   // -------------------------
@@ -79,6 +110,27 @@ async function saveBlockedSites(list) {
   #qsr-panel .btn.primary { background:#2563eb; border-color:#2563eb; }
   #qsr-panel .btn.danger { background:#b91c1c; border-color:#b91c1c; }
   #qsr-note { font-size:11px; opacity:.7; margin-top:6px; }
+  #qsr-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #111;
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    box-shadow: 0 8px 22px rgba(0,0,0,.35);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all .25s ease;
+    z-index: 2147483647;
+    pointer-events: none;
+  }
+
+  #qsr-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
   `;
 
   const styleEl = document.createElement("style");
@@ -192,7 +244,7 @@ async function saveBlockedSites(list) {
   const $dedupe = $("#qsr-dedupe");
 
   // Position persistence
-  const domainKey = `qsr-pos-${location.hostname}`;
+  const domainKey = `qsr-pos-${location.origin}`;
   chrome?.storage?.local?.get?.([domainKey], (res) => {
     const p = res?.[domainKey];
     if (p && typeof p.left === "number" && typeof p.top === "number") {
@@ -759,9 +811,10 @@ document.addEventListener("keydown", async (e) => {
     if (!blocked.includes(host)) {
       blocked.push(host);
       await saveBlockedSites(blocked);
-      alert(`🚫 Recorder disabled on:\n${host}\n\nReload page.`);
+      showToast(`🚫 Recorder disabled on:\n${host}\n\nReload page.`);
+      setTimeout(() => location.reload(), 800);
     } else {
-      alert("Site already blocked.");
+      showToast("Site already blocked.");
     }
 
   }
@@ -772,7 +825,7 @@ document.addEventListener("keydown", async (e) => {
     const newList = blocked.filter(s => s !== host);
     await saveBlockedSites(newList);
 
-    alert(`✅ Recorder restored on:\n${host}\n\nReload page.`);
+    showToast(`✅ Recorder restored on:\n${host}\n\nReload page.`);
   }
 
   // CTRL+SHIFT+L → show blocked sites list
@@ -880,3 +933,10 @@ function showBlockedSitesModal(list) {
   box.querySelector("#qsr-close-modal").onclick = () => modal.remove();
 
 }
+chrome.runtime.onMessage.addListener((msg) => {
+
+  if (msg.type === "QSR_TOAST") {
+    showToast(msg.message);
+  }
+  return;
+});
