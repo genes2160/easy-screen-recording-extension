@@ -4,7 +4,9 @@
     "version": "1.0.0",
     "description": "Floating draggable button to record the screen with optional zoom and duration.",
     "permissions": [
-        "storage"
+        "storage",
+        "contextMenus",
+        "tabs"
     ],
     "content_scripts": [
         {
@@ -16,5 +18,8 @@
             ],
             "run_at": "document_idle"
         }
-    ]
+    ],
+    "background": {
+        "service_worker": "background.js"
+    }
 }
