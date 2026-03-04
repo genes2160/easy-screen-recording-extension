@@ -54,12 +54,12 @@ function showToast(message) {
 }
 
 
-(async() => {
+(async () => {
   const blocked = await getBlockedSites();
   // Prevent widget loading if site blocked
   if (blocked.includes(host)) {
     console.log("🚫 Screen recorder disabled on this site:", host);
-    showToast(`🚫 Screen recorder disabled on this site ${host}`);
+    // showToast(`🚫 Screen recorder disabled on this site ${host}`);
     return;
   }
   if (window.__screenRecorderInjected) return;
