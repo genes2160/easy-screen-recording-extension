@@ -49,7 +49,7 @@ function showToast(message) {
   clearTimeout(toast.__hideTimer);
 
   toast.__hideTimer = setTimeout(() => {
-    toast.classList.remove("show");
+    toast.remove("show");
   }, 2500);
 }
 
