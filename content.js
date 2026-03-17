@@ -401,6 +401,7 @@ function showToast(message) {
 
       document.getElementById("qsr-widget").style.display = "none";
       stopFn = await recordScreen(3, secs * 1000, zoom, fps); // shorter countdown
+      window.__qsr_stopFn = stopFn;
       setTimeout(() => {
         document.getElementById("qsr-widget").style.display = "block";
       }, secs * 1000);
@@ -518,6 +519,13 @@ function showToast(message) {
     cameraStop: null,
     audioCtx: null,
     finalStream: null
+  };
+  // 2. Clear it in __qsr_reset so stale refs don't linger:
+  window.__qsr_reset = function () {
+    $start.disabled = false;
+    $stop.disabled = true;
+    $toggle.textContent = "⏺";
+    window.__qsr_stopFn = null; // ← add this line
   };
   // -------------------------
   // Robust recordScreen impl (with full audio capture + NEW audio UI)
@@ -799,13 +807,27 @@ function showToast(message) {
 
 document.addEventListener("keydown", async (e) => {
 
-  if (!e.shiftKey) return;
+  if (!e.altKey) return;
 
   const key = e.key.toLowerCase();
 
   const blocked = await getBlockedSites();
 
-  // CTRL+SHIFT+B → block current site
+  // ALT+S → stop recording
+  if (key === "s") {
+    if (typeof window.__qsr_stopFn === "function") {
+      window.__qsr_stopFn();
+      window.__qsr_stopFn = null;
+      if (document.getElementById("qsr-widget")) {
+        document.getElementById("qsr-widget").style.display = "block";
+      }
+      showToast("⏹️ Recording stopped");
+    } else {
+      showToast("No active recording to stop.");
+    }
+    return;
+  }
+  // ALT+B → block current site
   if (key === "b") {
 
     if (!blocked.includes(host)) {
@@ -819,7 +841,7 @@ document.addEventListener("keydown", async (e) => {
 
   }
 
-  // CTRL+SHIFT+R → restore site
+  // ALT+R → restore site
   if (key === "r") {
 
     const newList = blocked.filter(s => s !== host);
@@ -828,7 +850,7 @@ document.addEventListener("keydown", async (e) => {
     showToast(`✅ Recorder restored on:\n${host}\n\nReload page.`);
   }
 
-  // CTRL+SHIFT+L → show blocked sites list
+  // ALT+L → show blocked sites list
   if (key === "l") {
 
     showBlockedSitesModal(blocked);
