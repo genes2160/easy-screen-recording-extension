@@ -147,6 +147,7 @@ function showToast(message) {
       <div class="row">
         <label for="qsr-secs">Duration (s)</label>
         <input id="qsr-secs" type="number" min="1" step="1" value="10" />
+        <label><input id="qsr-no-end" type="checkbox" /> No end time</label>
         <label>FPS <input id="qsr-fps" type="number" min="10" max="60" step="1" value="30" style="width:60px"/></label>
       </div>
 
@@ -219,6 +220,7 @@ function showToast(message) {
   const $toggle = $("#qsr-toggle");
   const $panel = $("#qsr-panel");
   const $secs = $("#qsr-secs");
+  const $noEnd = $("#qsr-no-end");
   const $zoomOn = $("#qsr-zoom-on");
   const $zs = $("#qsr-zs");
   const $ze = $("#qsr-ze");
@@ -242,6 +244,13 @@ function showToast(message) {
   const $compRa = $("#qsr-comp-ra");
   const $compKn = $("#qsr-comp-kn");
   const $dedupe = $("#qsr-dedupe");
+
+  // Toggle duration input when "No end time" is checked
+  $noEnd.addEventListener("change", () => {
+    $secs.disabled = $noEnd.checked;
+    if ($noEnd.checked) $secs.style.opacity = "0.4";
+    else $secs.style.opacity = "1";
+  });
 
   // Position persistence
   const domainKey = `qsr-pos-${location.origin}`;
@@ -374,11 +383,12 @@ function showToast(message) {
 
   $start.addEventListener("click", async () => {
     try {
-      //apply default seconds if the input is empty or invalid
-      if ($secs.value === "" || isNaN($secs.value) || +$secs.value <= 0) {
+      const noEndTime = $noEnd.checked;
+      //apply default seconds if the input is empty or invalid (only when duration is used)
+      if (!noEndTime && ($secs.value === "" || isNaN($secs.value) || +$secs.value <= 0)) {
         $secs.value = 300;
       }
-      const secs = Math.max(1, +$secs.value || 10);
+      const secs = noEndTime ? null : Math.max(1, +$secs.value || 10);
       const useZoom = $zoomOn.checked;
       const fps = Math.max(10, Math.min(60, +$fps.value || 30));
 
@@ -390,7 +400,7 @@ function showToast(message) {
         ? {
           start: Math.max(1, +$zs.value || 1),
           end: Math.max(1, +$ze.value || 1.4),
-          duration: Math.min(secs * 1000, 60000), // cap zoom anim to 60s
+          duration: Math.min((secs || 60) * 1000, 60000), // cap zoom anim to 60s
           fps,
           focus: {
             x: Math.max(0, Math.min(1, +$fx.value || 0.5)),
@@ -400,11 +410,14 @@ function showToast(message) {
         : null;
 
       document.getElementById("qsr-widget").style.display = "none";
-      stopFn = await recordScreen(3, secs * 1000, zoom, fps); // shorter countdown
+      const durationMs = secs ? secs * 1000 : null;
+      stopFn = await recordScreen(3, durationMs, zoom, fps); // shorter countdown
       window.__qsr_stopFn = stopFn;
-      setTimeout(() => {
-        document.getElementById("qsr-widget").style.display = "block";
-      }, secs * 1000);
+      if (secs) {
+        setTimeout(() => {
+          document.getElementById("qsr-widget").style.display = "block";
+        }, secs * 1000);
+      }
     } catch (error) {
       console.log("Failed to start recording. Check console.", error);
       document.getElementById("qsr-widget").style.display = "block";
@@ -734,12 +747,15 @@ function showToast(message) {
         }, durationMs);
       }
 
-      // 🟥 Handle manual user stop (video track end)
+      // 🟥 Handle manual user stop (video track end / screen share stopped)
       finalStream.getVideoTracks()[0].onended = () => {
         if (mediaRecorder.state === "recording") {
           console.log("🎞️ Video stream ended — stopping recording");
           mediaRecorder.stop();
         }
+        // Always restore widget when screen share ends
+        const widget = document.getElementById("qsr-widget");
+        if (widget) widget.style.display = "block";
       };
       return () => {
         if (mediaRecorder.state === "recording") {
